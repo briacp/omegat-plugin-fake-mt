@@ -1,0 +1,12 @@
+build
+.gradle
+.settings
+.project
+.classpath
+bin
+.nb-gradle
+local.properties
+.idea
+
+node-server/node_modules
+node-server/package-lock.json

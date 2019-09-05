@@ -1,0 +1,17 @@
+{
+  "name": "fake_tm",
+  "version": "1.0.0",
+  "description": "",
+  "main": "tm_server.js",
+  "scripts": {
+    "start": "node tm_server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.17.1",
+    "json": "^9.0.6"
+  }
+}

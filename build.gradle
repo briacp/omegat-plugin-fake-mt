@@ -1,0 +1,114 @@
+plugins {
+    id 'java'
+    id 'findbugs'
+    id 'checkstyle'
+    id 'distribution'
+    id 'maven'
+    id 'idea'
+	id 'eclipse'
+}
+
+repositories {
+    maven {
+        url "https://dl.bintray.com/omegat-org/maven"
+    }
+    jcenter()
+}
+
+def compileDependencies = [
+        'org.omegat:omegat:4.3.0',
+        'commons-io:commons-io:2.4',
+        'commons-lang:commons-lang:2.6'
+]
+
+def testDependencies = [
+        'junit:junit:4.12',
+        'xmlunit:xmlunit:1.6',
+        'org.madlonkay.supertmxmerge:supertmxmerge:2.0.1'
+]
+
+dependencies {
+
+    compileDependencies.each {
+        compileOnly it
+        //testImplementation it
+    }
+
+    testDependencies.each {
+        //testImplementation it
+    }
+}
+
+
+tasks.withType(JavaCompile) {
+    options.compilerArgs << "-Xlint:deprecation" << "-Xlint:unchecked"
+}
+
+jar {
+    manifest {
+        // plugin's main class name is defined in gradle.properties file.
+        attributes(
+                "OmegaT-Plugins": pluginMainClass,
+                "Plugin-Version": version,
+                "Plugin-Name": pluginName,
+                "Main-Class": pluginMainClass
+        )
+    }
+}
+
+/* Checkstyle */
+checkstyle {
+    config = resources.text.fromFile("${rootProject.projectDir}/config/checkstyle/checkstyle.xml")
+    ignoreFailures = true
+    toolVersion = '7.1'
+    sourceSets = [project.sourceSets.main]
+}
+tasks.checkstyleMain.setGroup('Verification')
+tasks.remove(tasks['checkstyleTest'])
+
+/* FindBugs */
+findbugs {
+    ignoreFailures = true
+    sourceSets = [project.sourceSets.main]
+}
+
+tasks.withType(FindBugs) {
+    setGroup('Verification')
+    reports {
+        xml.enabled = false
+        html.enabled = true
+    }
+}
+tasks.remove(tasks['findbugsTest'])
+
+artifacts {
+    archives jar
+}
+
+distTar {
+    compression = Compression.GZIP
+}
+
+distributions {
+    main {
+        contents {
+            from('README.md', 'COPYING')
+            into('docs') {
+                from 'CHANGELOG.md'
+            }
+
+            from(jar) {
+                into 'plugin'
+            }
+        }
+    }
+}
+
+
+task installPlugin(type: Copy) {
+        from 'build/install/omegat-plugin-fake-mt/plugin'
+        into omegatPluginDir
+        include('*.jar')
+}
+
+installPlugin.dependsOn installDist
