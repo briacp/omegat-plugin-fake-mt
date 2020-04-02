@@ -6,9 +6,16 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.TreeMap;
 
+import javax.swing.ButtonGroup;
+import javax.swing.JRadioButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+
+import javax.script.Invocable;
+import javax.script.ScriptEngine;
+import javax.script.ScriptEngineManager;
+import javax.script.ScriptException;
 
 import org.omegat.core.CoreEvents;
 import org.omegat.core.events.IApplicationEventListener;
@@ -21,6 +28,20 @@ import org.omegat.util.Log;
 import org.omegat.util.OStrings;
 import org.omegat.util.Preferences;
 import org.omegat.util.WikiGet;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import org.w3c.dom.Document;
+import org.xml.sax.InputSource;
+import java.io.StringReader;
+import java.io.InputStreamReader;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathExpression;
+import javax.xml.xpath.XPathFactory;
+
 
 public class FakeMT  extends BaseTranslate {
 
@@ -36,6 +57,10 @@ public class FakeMT  extends BaseTranslate {
     protected static final String PARAM_TARGET_DEFAULT = "target";
     protected static final String PARAM_TEXT = "fakemt.query.text";
     protected static final String PARAM_TEXT_DEFAULT = "text";
+    protected static final String PARAM_FORMAT = "fakemt.result.format";
+    protected static final String PARAM_FORMAT_DEFAULT = "json";
+    protected static final String PARAM_EXPR = "fakemt.result.expr";
+    protected static final String PARAM_EXPR_DEFAULT = "$.translation";
 
     // Plugin setup
     public static void loadPlugins() {
@@ -84,7 +109,7 @@ public class FakeMT  extends BaseTranslate {
             return e.getLocalizedMessage();
         }
 
-        String tr = getJsonResults(v);
+        String tr = Preferences.getPreferenceDefault(PARAM_FORMAT, "json").equals("json") ? getJsonResults(v) : getXmlResults(v);
 
         if (tr == null) {
             return "";
@@ -94,21 +119,44 @@ public class FakeMT  extends BaseTranslate {
         return tr;
     }
 
+    private static final Invocable jsonParser;
+    static {
+        ScriptEngine jsEngine = null;
+        try {
+            jsEngine = new ScriptEngineManager().getEngineByName("javascript");
+            jsEngine.eval(new InputStreamReader(FakeMT.class.getResourceAsStream("/net/briac/omegat/path.js")));
+            jsEngine.eval("function parse(json,expr) { return Java.asJSONCompatible(jsonPath(JSON.parse(json),expr)[0]) }");
+        } catch (ScriptException e) {
+            Logger.getLogger(FakeMT.class.getName()).log(Level.SEVERE, "Unable to initialize JSON parser", e);
+        } finally {
+            jsonParser = (Invocable) jsEngine;
+        }
+    }
+
     @SuppressWarnings("unchecked")
     protected String getJsonResults(String json) {
-        Map<String, Object> rootNode;
         try {
-            rootNode = (Map<String, Object>) JsonParser.parse(json);
+            return jsonParser.invokeFunction("parse", json, Preferences.getPreferenceDefault(PARAM_EXPR, PARAM_EXPR_DEFAULT)).toString();
         } catch (Exception e) {
             Log.logErrorRB(e, "MT_JSON_ERROR");
             return OStrings.getString("MT_JSON_ERROR");
         }
+    }
 
-        // { "translation": "Hello World!" } 
+    @SuppressWarnings("unchecked")
+    protected String getXmlResults(String xml) {
         try {
-            return rootNode.get("translation").toString();
-        } catch (NullPointerException e) {
-            return null;
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(true);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(new InputSource(new StringReader(xml)));
+            XPathFactory xpathfactory = XPathFactory.newInstance();
+            XPath xpath = xpathfactory.newXPath();
+            XPathExpression expr = xpath.compile(Preferences.getPreferenceDefault(PARAM_EXPR, PARAM_EXPR_DEFAULT));
+            return expr.evaluate(doc, XPathConstants.STRING).toString();
+        } catch (Exception e) {
+            Log.logErrorRB(e, "MT_JSON_ERROR");
+            return OStrings.getString("MT_JSON_ERROR");
         }
     }
 
@@ -243,7 +291,62 @@ public class FakeMT  extends BaseTranslate {
         mtPanel.add(paramTextField, gridBagConstraints);
         uiRow++;
         
-        
+        // Format parameter
+        JLabel resultFormatLabel = new JLabel("Result format:");
+        gridBagConstraints = new java.awt.GridBagConstraints();
+        gridBagConstraints.gridx = 0;
+        gridBagConstraints.gridy = uiRow;
+        gridBagConstraints.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        gridBagConstraints.anchor = java.awt.GridBagConstraints.WEST;
+        gridBagConstraints.insets = new java.awt.Insets(0, 0, 10, 5);
+        mtPanel.add(resultFormatLabel, gridBagConstraints);
+
+        JPanel pFormats = new JPanel();
+        JRadioButton jsonBox = new JRadioButton("JSON");
+        jsonBox.setSelected(Preferences.getPreferenceDefault(PARAM_FORMAT, "json").equals("json"));
+        pFormats.add(jsonBox);
+        JRadioButton xmlBox = new JRadioButton("XML");
+        xmlBox.setSelected(Preferences.getPreferenceDefault(PARAM_FORMAT, "json").equals("xml"));
+        pFormats.add(xmlBox);
+        ButtonGroup gFormats = new ButtonGroup();
+        gFormats.add(jsonBox);
+        gFormats.add(xmlBox);
+        gridBagConstraints = new java.awt.GridBagConstraints();
+        gridBagConstraints.gridx = 1;
+        gridBagConstraints.gridy = uiRow;
+        gridBagConstraints.gridwidth = java.awt.GridBagConstraints.REMAINDER;
+        gridBagConstraints.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        gridBagConstraints.ipadx = 50;
+        gridBagConstraints.anchor = java.awt.GridBagConstraints.WEST;
+        gridBagConstraints.insets = new java.awt.Insets(0, 0, 10, 0);
+        paramSourceLabel.setLabelFor(paramSourceField);
+        mtPanel.add(pFormats, gridBagConstraints);
+        uiRow++;
+
+        // Text Parameter
+        JLabel exprLabel = new JLabel(jsonBox.isSelected() ? "JSONPath expression:" : "XPath expression:");
+        gridBagConstraints = new java.awt.GridBagConstraints();
+        gridBagConstraints.gridx = 0;
+        gridBagConstraints.gridy = uiRow;
+        gridBagConstraints.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        gridBagConstraints.anchor = java.awt.GridBagConstraints.WEST;
+        gridBagConstraints.insets = new java.awt.Insets(0, 0, 10, 5);
+        mtPanel.add(exprLabel, gridBagConstraints);
+        jsonBox.addChangeListener(ev -> exprLabel.setText(jsonBox.isSelected() ? "JSONPath expression:" : "XPath expression:"));
+
+        JTextField exprField = new JTextField(Preferences.getPreferenceDefault(PARAM_EXPR, PARAM_EXPR_DEFAULT));
+        gridBagConstraints = new java.awt.GridBagConstraints();
+        gridBagConstraints.gridx = 1;
+        gridBagConstraints.gridy = uiRow;
+        gridBagConstraints.gridwidth = java.awt.GridBagConstraints.REMAINDER;
+        gridBagConstraints.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        gridBagConstraints.ipadx = 50;
+        gridBagConstraints.anchor = java.awt.GridBagConstraints.WEST;
+        gridBagConstraints.insets = new java.awt.Insets(0, 0, 10, 0);
+        paramSourceLabel.setLabelFor(paramSourceField);
+        mtPanel.add(exprField, gridBagConstraints);
+        uiRow++;
+
         MTConfigDialog dialog = new MTConfigDialog(parent, getName()) {
             @Override
             protected void onConfirm() {
@@ -252,13 +355,19 @@ public class FakeMT  extends BaseTranslate {
 
                 System.setProperty(PARAM_URL, urlField.getText());
                 Preferences.setPreference(PARAM_URL, urlField.getText());
-                
+
                 System.setProperty(PARAM_TEXT, paramTextField.getText());
                 Preferences.setPreference(PARAM_TEXT, paramTextField.getText());
-                
+
+                System.setProperty(PARAM_FORMAT, xmlBox.isSelected() ? "xml" : "json");
+                Preferences.setPreference(PARAM_FORMAT, xmlBox.isSelected() ? "xml" : "json");
+
+                System.setProperty(PARAM_EXPR, exprField.getText());
+                Preferences.setPreference(PARAM_EXPR, exprField.getText());
+
                 System.setProperty(PARAM_SOURCE, paramSourceField.getText());
                 Preferences.setPreference(PARAM_SOURCE, paramSourceField.getText());
-                
+
                 System.setProperty(PARAM_TARGET, paramTargetField.getText());
                 Preferences.setPreference(PARAM_TARGET, paramTargetField.getText());
             }
